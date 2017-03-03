@@ -44,7 +44,11 @@ void shell::add_line()
 
     while(sstr >> word)
     {
-        if (word == "&&")
+        if (word[0] == "#")
+        {
+            break;
+        }
+        else if (word == "&&")
         {
             cmds.push(new command(arguments));
             curr = new logicaland();
@@ -72,8 +76,11 @@ void shell::add_line()
             arguments.push_back(word);
         }
     }
-    cmds.push(new command(arguments));
-
+    if (!arguments.empty())
+    {
+        cmds.push(new command(arguments));
+    }
+        
     command * currcmd = cmds.front();
     connector * currcon = 0;
     cmds.pop();
