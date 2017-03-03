@@ -1,1 +1,0 @@
-Parsing works. However, I'm unable to execute commands correctly as I was struggling to process the execvp which yields the commands.
