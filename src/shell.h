@@ -44,7 +44,7 @@ void shell::add_line()
 
     while(sstr >> word)
     {
-        if (word[0] == "#")
+        if (word[0] == '#')
         {
             break;
         }
