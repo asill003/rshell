@@ -174,11 +174,13 @@ statement::statement(string &userinput) : command(vector<string>())
         }
         else if (word[0] == '(')
         {
-            int npars = 1;
-            for (unsigned i = 1; i != word.size(); i++)
+            int npars = 0;
+            for (unsigned i = 0; word[i] == '('; i++) {
+                npars++;
+            }
+            for (unsigned i = word.size() - 1; word[i] == ')'; i--)
             {
-                if (word[i] == '(') npars++;
-                else if (word[i] == ')') npars--;
+                npars--;
             }
             if (npars == 0)
             {
@@ -191,42 +193,35 @@ statement::statement(string &userinput) : command(vector<string>())
             bool found = false;
             while (sstr >> word)
             {
-                if (word[word.size() - 1] == ')')
+                for (unsigned i = 0; word[i] == '('; i++)
                 {
-                    if (npars == 1)
+                    npars++;
+                }
+                for (unsigned i = word.size() - 1; word[i] == ')'; i--)
+                {
+                    npars--;
+                }
+                
+                if (npars == 0) {
+                    end = sstr.tellg();
+                    if (end == -1)
                     {
-                        end = sstr.tellg();
-                        if (end == -1)
-                        {
-                            end = userinput.size() - 1;
-                        }
-                        else
-                        {
-                            end--;
-                        }
-                        para = userinput.substr(start, end - start);
-                        cmds.push(new statement(para));
-                        found = true;
-                        break;
+                        end = userinput.size() - 1;
                     }
                     else
                     {
-                        npars--;
+                        end -= 1;
                     }
-                }
-                else
-                {
-                    if (word[0] == '(')
-                    {
-                        npars++;
-                    }
+                    para = userinput.substr(start, end - start);
+                    cmds.push(new statement(para));
+                    found = true;
+                    break;
                 }
             }
             
             if (!found)
             {
                 cout << "error missing ')'" << endl;
-                exit(0);
             }
         }
         else if (word == "&&")
@@ -267,8 +262,7 @@ bool statement::execute()
 {
     if (cmds.size() == 0)
     {
-        cout << "no input into statement or a messed up parentheses" << endl;
-        exit(0);
+        return 0;
     }
     command * currcmd = cmds.front();
     connector * currcon = 0;
