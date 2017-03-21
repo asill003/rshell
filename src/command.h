@@ -9,13 +9,14 @@
 #include <string>
 #include <sys/wait.h>
 #include <sstream>
+#include <fcntl.h>
 using namespace std;
 
 class command
 {
 public:
 	command(vector<string>);
-	virtual bool execute();
+	bool execute();
 private:
 	vector<string> args;
 };
@@ -23,6 +24,82 @@ private:
 command::command(vector<string> strs)
 {
 	args = strs;
+}
+
+class node
+{
+public:
+    node() {};
+    node * left;
+    node * right;
+    virtual bool execute() = 0;
+};
+
+class pipenode : public node
+{
+public:
+    pipenode() {};
+    bool execute();
+};
+
+class commandnode : public node
+{
+public:
+    commandnode(vector<string> &cmdargs) : args(cmdargs) {left = 0; right = 0;};
+    vector<string> args;
+    bool execute();
+};
+
+char * gen_random(const int len) {
+    char * s = (char *)malloc(len * sizeof(char));
+    static const char alphanum[] =
+        "0123456789"
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "abcdefghijklmnopqrstuvwxyz";
+
+    for (int i = 0; i < len; ++i) {
+        s[i] = alphanum[rand() % (sizeof(alphanum) - 1)];
+    }
+
+    s[len] = 0;
+    return s;
+}
+
+bool pipenode::execute() {
+    int back, nfd;
+    fflush(stdout);
+    back = dup(1);
+    char * str = gen_random(40);
+    str[0] = '/';
+    str[1] = 't';
+    str[2] = 'm';
+    str[3] = 'p';
+    str[4] = '/';
+    FILE * file = fopen(str, "wb");
+    nfd = fileno(file);
+
+    dup2(nfd, 1);
+    close(nfd);
+    
+    left->execute();
+
+    fflush(stdout);
+    dup2(back, 1);
+    close(back);
+
+    commandnode * cmdnode = (commandnode *)right;
+    if (cmdnode->args[0] == "grep" || cmdnode->args[0] == "cat")
+        cmdnode->args.push_back(string(str));
+
+    bool val = right->execute();
+    remove(str);
+
+    return val;
+}
+
+bool commandnode::execute() {
+    command * cmd = new command(args);
+    return cmd->execute();
 }
 
 bool command::execute() 
@@ -66,43 +143,171 @@ bool command::execute()
 		return test;	
 	}
 
-	int status;
-	char * cmd = (char *)args[0].c_str();                                       //c string and array of strings
-	char * argv[args.size() + 1];
-	for (unsigned i = 0; i != args.size(); i++)
-	{
-		argv[i] = (char *)args[i].c_str();                                                              
-	}
-	argv[args.size()] = 0;
+    node * root = 0;
+    node * parent = 0;
 
-	pid_t pid = fork();                                                 //forking the process: parent and child
-	if (pid == -1)
-	{
-		perror("error: failed to fork");
-		exit(EXIT_FAILURE);                                         // if the fork fails
-		return 0;
-	}
-	else if (pid == 0)
-	{
-		execvp(cmd, argv);
-		string str = cmd;                                                   // if it works, it will exec, then the rest of this will not happen
-		for (unsigned i = 1; i != args.size(); i++)                             //if there is an error it will print the userinput and exit 
-		{
-			str += " " + args[i];
-		}
-		perror(str.c_str());
-		exit(EXIT_FAILURE);
-		return 0;
-	}
-	else
-	{
-		while(waitpid(0, &status, 0) == -1)
-		{
-			perror("error: unable to wait");
-			return 0;                                               //error if it does not wait for the fork
-		}
-		return status == 0;
-	}
+    vector<string> cmdargs;
+    for (int i = args.size() - 1; i != -1; i--)
+    {
+        if (args[i] != "|")
+        {
+            cmdargs.insert(cmdargs.begin(), args[i]);
+        }
+        else if (args[i] == "|")
+        {
+            if (root == 0)
+            {
+                root = parent = new pipenode();
+                root->right = new commandnode(cmdargs);
+                cmdargs.clear();
+            }
+            else
+            {
+                parent->left = new pipenode();
+                parent = parent->left;
+                parent->right = new commandnode(cmdargs);
+                cmdargs.clear();
+            }
+        }
+    }
+    if (root != 0) {
+        parent->left = new commandnode(cmdargs);
+        return root->execute();
+    }
+
+    int i;
+    int type = 0;
+    for (i = 0; i != args.size(); i++)
+    {
+        if (args[i] == ">")
+        {
+            type = 1;
+            break;
+        }
+        else if (args[i] == ">>")
+        {
+            type = 2;
+            break;
+        }
+        else if (args[i] == "<")
+        {
+            type = 3;
+            break;
+        }
+    }
+    if (type == 1)
+    {
+        if (args.size() == i+1) {
+            perror("syntax error near unexpected token 'newline'");
+            return 0;
+        }
+
+        int back, nfd;
+        fflush(stdout);
+        back = dup(1);
+        FILE * file = fopen(args[i+1].c_str(), "wb");
+        nfd = fileno(file);
+
+        dup2(nfd, 1);
+        close(nfd);
+        
+        vector<string> cmdargs;
+        for (int j = 0; j != i; j++) {
+            cmdargs.push_back(args[j]);
+        }
+
+        command * cmd = new command(cmdargs);
+        bool val = cmd->execute();
+
+        fflush(stdout);
+        dup2(back, 1);
+        close(back);
+        return val;
+    }
+    else if (type == 2) {
+        if (args.size() == i+1) {
+            perror("syntax error near unexpected token 'newline'");
+            return 0;
+        }
+
+        int back, nfd;
+        fflush(stdout);
+        back = dup(1);
+        FILE * file = fopen(args[i+1].c_str(), "a+");
+        nfd = fileno(file);
+
+        dup2(nfd, 1);
+        close(nfd);
+        
+        vector<string> cmdargs;
+        for (int j = 0; j != i; j++) {
+            cmdargs.push_back(args[j]);
+        }
+
+        command * cmd = new command(cmdargs);
+        bool val = cmd->execute();
+
+        fflush(stdout);
+        dup2(back, 1);
+        close(back);
+        return val;
+    }
+    else if (type == 3) {
+        if (args.size() == i+1) {
+            perror("syntax error near unexpected token 'newline'");
+            return 0;
+        }
+
+        if (args[0] == "grep" || args[0] == "cat") {
+            vector<string>::iterator iter = args.begin();
+            advance(iter, i);
+            args.erase(iter);
+        }
+        else {
+            vector<string>::iterator iter = args.begin();
+            advance(iter, i);
+            args.erase(iter);
+            args.erase(iter);
+        }
+    }
+
+    int status;
+    char * cmd = (char *)args[0].c_str();                                       //c string and array of strings
+    char * argv[args.size() + 1];
+    for (unsigned i = 0; i != args.size(); i++)
+    {
+        argv[i] = (char *)args[i].c_str();                                                              
+    }
+    argv[args.size()] = 0;
+
+    pid_t pid = fork();                                                 //forking the process: parent and child
+    if (pid == -1)
+    {
+        perror("error: failed to fork");
+        exit(EXIT_FAILURE);                                         // if the fork fails
+        return 0;
+    }
+    else if (pid == 0)
+    {
+        execvp(cmd, argv);
+        string str = cmd;                                                   // if it works, it will exec, then the rest of this will not happen
+        for (unsigned i = 1; i != args.size(); i++)                             //if there is an error it will print the userinput and exit 
+        {
+            str += " " + args[i];
+        }
+        perror(str.c_str());
+        exit(EXIT_FAILURE);
+        return 0;
+    }
+    else
+    {
+        while(waitpid(0, &status, 0) == -1)
+        {
+            perror("error: unable to wait");
+            return 0;                                               //error if it does not wait for the fork
+        }
+        return status == 0;
+    }
 }
 
 class connector
@@ -146,6 +351,8 @@ bool semicolon::execen(bool left, command * right)
 {
     return right->execute();
 }
+
+
 
 class statement : public command
 {
